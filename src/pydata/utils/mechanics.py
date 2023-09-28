@@ -75,6 +75,22 @@ def get_fracture_strain(strain: ndarray, stress: ndarray, slop_criteria: float) 
         return strain[-1], stress[-1]
 
 
+def get_peak_valley_time(strain: ndarray, stress: ndarray, time: ndarray, n: int):
+    diff_stress = np.diff(stress)
+    diff_strain = np.diff(strain)
+    none_zero_indices = (diff_strain != 0.0)
+    diff_strain = diff_strain[none_zero_indices]
+    diff_strain_filter = np.convolve(diff_strain, np.ones((n,)) / n, mode='same')
+
+    indices = np.where(np.diff(np.sign(diff_strain_filter)) != 0)[0]
+    peak_valley_time = time[1:][none_zero_indices][1:][indices]
+
+    plt.plot(time, strain)
+    plt.plot(time[1:][none_zero_indices], np.sign(diff_strain_filter), ls='', marker='o')
+
+    return peak_valley_time
+
+
 def plot_elastic_limit(elastic_limit: list[float, float]) -> None:
     plt.plot(elastic_limit[0], elastic_limit[1], "bo", label="Elastic Breakpoint")
     plt.text(elastic_limit[0] + 0.01, elastic_limit[1] - 0.01, f"({elastic_limit[0]:.3f}, {elastic_limit[1]:.3f})",
@@ -132,10 +148,11 @@ if __name__ == '__main__':
 
         elastic_limit, E, shift = get_elastic_limit(strain_exp, stress_exp, 0.005, 0.1, 0.01)
         # fracture_strain, fracture_stress = get_fracture_strain(strain_exp, stress_exp, -50.0)
+        get_peak_valley_time(strain_exp, stress_exp, time, 10)
 
-        plot_stress_strain(strain_exp, stress_exp)
-        plot_elastic_limit(elastic_limit)
-        plot_elastic_module(elastic_limit, E, shift)
+        # plot_stress_strain(strain_exp, stress_exp)
+        # plot_elastic_limit(elastic_limit)
+        # plot_elastic_module(elastic_limit, E, shift)
         # plot_ultimate_stress(stress_exp)
         # plot_fracture_strain(fracture_strain, fracture_stress)
         plt.show()
