@@ -296,13 +296,17 @@ def get_virtual_status(path, virtual_id):
                 status['link'] = message['link']
             else:
                 status['link'] = 'None'
-            status['operation'] = "<a href='%s'>进入</a> | <a href='%s'>编辑</a> | <a onclick=\"return confirm('确定删除模型?')\" href='%s'>删除</a>" % (
-                'view_virtual/' + str(virtual_id), 'edit_virtual/' + str(virtual_id), 'delete_virtual/' + str(virtual_id))
+            status[
+                'operation'] = "<a href='%s'>进入</a> | <a href='%s'>编辑</a> | <a onclick=\"return confirm('确定删除模型?')\" href='%s'>删除</a>" % (
+                'view_virtual/' + str(virtual_id), 'edit_virtual/' + str(virtual_id),
+                'delete_virtual/' + str(virtual_id))
         except (FileNotFoundError, KeyError):
             for key in ['name', 'template', 'project_time', 'descript', 'job', 'user', 'cpus', 'link']:
                 status[key] = 'None'
-            status['operation'] = "<a href='%s'>进入</a> | <a href='%s'>编辑</a> | <a onclick=\"return confirm('确定删除模型?')\" href='%s'>删除</a>" % (
-                'view_virtual/' + str(virtual_id), 'edit_virtual/' + str(virtual_id), 'delete_virtual/' + str(virtual_id))
+            status[
+                'operation'] = "<a href='%s'>进入</a> | <a href='%s'>编辑</a> | <a onclick=\"return confirm('确定删除模型?')\" href='%s'>删除</a>" % (
+                'view_virtual/' + str(virtual_id), 'edit_virtual/' + str(virtual_id),
+                'delete_virtual/' + str(virtual_id))
     return status
 
 
