@@ -2,13 +2,14 @@
 """
 
 """
-import numpy as np
-from numpy import ndarray
-import requests
 import os
 import traceback
-import pandas as pd
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import requests
+from numpy import ndarray
 
 from src.pydata.utils.dir_status import experiment_specimens_detail
 
@@ -75,20 +76,26 @@ def get_fracture_strain(strain: ndarray, stress: ndarray, slop_criteria: float) 
         return strain[-1], stress[-1]
 
 
-def get_peak_valley_time(strain: ndarray, stress: ndarray, time: ndarray, n: int):
+def get_peak_valley_time(strain: ndarray, stress: ndarray, time: ndarray, n: int) -> tuple[ndarray, ndarray]:
     diff_stress = np.diff(stress)
     diff_strain = np.diff(strain)
     none_zero_indices = (diff_strain != 0.0)
     diff_strain = diff_strain[none_zero_indices]
-    diff_strain_filter = np.convolve(diff_strain, np.ones((n,)) / n, mode='same')
 
-    indices = np.where(np.diff(np.sign(diff_strain_filter)) != 0)[0]
-    peak_valley_time = time[1:][none_zero_indices][1:][indices]
+    for i in range(n, n + 20):
+        diff_strain_filter = np.convolve(diff_strain, np.ones((i,)) / i, mode='same')
+        if np.sum(np.sign(diff_strain_filter) == 0) == 0:
+            break
+        else:
+            raise NotImplementedError
 
-    plt.plot(time, strain)
-    plt.plot(time[1:][none_zero_indices], np.sign(diff_strain_filter), ls='', marker='o')
+    peak_indices = np.where(np.diff(np.sign(diff_strain_filter)) < 0)[0]
+    valley_indices = np.where(np.diff(np.sign(diff_strain_filter)) > 0)[0]
 
-    return peak_valley_time
+    peak_time = time[1:][none_zero_indices][1:][peak_indices]
+    valley_time = time[1:][none_zero_indices][1:][valley_indices]
+
+    return peak_time, valley_time
 
 
 def plot_elastic_limit(elastic_limit: list[float, float]) -> None:
@@ -148,7 +155,7 @@ if __name__ == '__main__':
 
         elastic_limit, E, shift = get_elastic_limit(strain_exp, stress_exp, 0.005, 0.1, 0.01)
         # fracture_strain, fracture_stress = get_fracture_strain(strain_exp, stress_exp, -50.0)
-        get_peak_valley_time(strain_exp, stress_exp, time, 10)
+        get_peak_valley_time(strain_exp, stress_exp, time, 5)
 
         # plot_stress_strain(strain_exp, stress_exp)
         # plot_elastic_limit(elastic_limit)
