@@ -87,8 +87,8 @@ def finite_element_solution_damage(paras: list, constants: dict, strain: ndarray
     job.props.materials[0].data = material_data
     job.props.materials[1].data = paras
     job.props.solver.total_time = total_time
-    job.props.solver.max_dtime = total_time / 50.0
-    job.props.solver.initial_dtime = total_time / 50.0
+    job.props.solver.max_dtime = total_time / 100.0
+    job.props.solver.initial_dtime = total_time / 100.0
     job.props.amplitudes[0].data = amplitude
     job.assembly.__init__(job.props)
 
@@ -248,10 +248,33 @@ def partial_by_fracture_strain(data: dict) -> dict:
 
         try:
             fracture_strain, fracture_stress = get_fracture_strain(strain, stress, -50.0)
-            elastic_indices = strain < fracture_strain
+            elastic_indices = strain < (fracture_strain - 0.05)
             time = time[elastic_indices]
             strain = strain[elastic_indices]
             stress = stress[elastic_indices]
+        except:
+            pass
+
+        processed_data[key] = create_data_dict(time, strain, stress)
+
+    return processed_data
+
+
+def partial_by_ultimate_stress(data: dict) -> dict:
+    """
+    对数据进行预处理，截取断裂之前的部分
+    """
+    processed_data = {}
+    for key in data.keys():
+        time = array(data[key]['Time_s'])
+        strain = array(data[key]['Strain'])
+        stress = array(data[key]['Stress_MPa'])
+
+        try:
+            ultimate_stress_index = np.argmax(stress)
+            time = time[:ultimate_stress_index]
+            strain = strain[:ultimate_stress_index]
+            stress = stress[:ultimate_stress_index]
         except:
             pass
 
@@ -369,9 +392,10 @@ def optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants,
     local_experiments_path = r'F:/GitHub/pydata/download/experiments'
     experiment_id = 7
     tensile_experiment_data, tensile_experiment_status = get_experiment_data(local_experiments_path, experiment_id, tensile_specimen_ids)
-    processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.0)
-    # processed_tensile_data = partial_by_elastic_limit(processed_tensile_data, strain_start=0.005, strain_end=0.1, threshold=0.1)
+    processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.01)
+    # processed_tensile_data = partial_by_elastic_limit(processed_tensile_data, strain_start=0.005, strain_end=0.1, threshold=0.05)
     processed_tensile_data = partial_by_fracture_strain(processed_tensile_data)
+    # processed_tensile_data = partial_by_ultimate_stress(processed_tensile_data)
     processed_tensile_data = reduce_to_target_rows(processed_tensile_data)
 
     experiment_id = 9
@@ -389,7 +413,7 @@ def optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants,
 def func(x: list, processed_tensile_data: dict, processed_relax_data: dict, constants: dict):
     cost = 0.0
     cost += cal_tensile_cost(processed_tensile_data, x, constants)
-    # cost += cal_relax_cost(processed_relax_data, x, constants)
+    cost += cal_relax_cost(processed_relax_data, x, constants) * 0.0
     punish = 0.0
     y = cost
     for i in range(len(x)):
@@ -432,38 +456,49 @@ def optimize_paras_0_year():
 
 def optimize_paras_2_year():
     """
-    paras = [0.01875972, 0.00206912]
-    paras = [0.01992902, 0.00181885]
-    constants = [0.95, 0.14, 7.69765659, 0.1, 9.25720943, 2.0, 2.83577589, 1000.0]
-    constants = [0.95, 0.14, 25.79364856, 0.05, 8.41095917, 40.0, 2.39640248, 1000.0]
+    paras_0 = [0.0144384, 0.00222176]
+    constants = {'E_inf': 0.95,
+                 'nu': 0.14,
+                 'mode': 'fem',
+                 'tau_number': 3,
+                 'tau': [0.1, 2.0, 1000.0],
+                 'E': [8.77088244 * 1.2, 9.09440754 * 1.2, 2.83638807 * 1.2]}
     """
     tensile_specimen_ids = [11, 14, 17]
     relax_specimen_ids = [4]
-    paras_0 = [1, 1, 1]
+    # paras_0 = [1, 1, 1]
+    paras_0 = [0.0144384, 0.00222176]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
-                 'mode': 'analytical',
+                 'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.05, 40.0, 1000.0]}
+                 'tau': [0.1, 2.0, 1000.0],
+                 'E': [8.77088244 * 1.2, 9.09440754 * 1.2, 2.83638807 * 1.2]}
     optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants)
 
 
 def optimize_paras_8_year():
     """
-    paras_0 = [0.02338096, 0.00357043]
-    constants = [0.95, 0.14, 17.65974303, 0.1, 6.20743176, 2.0, 4.36829172, 1000.0]
-    constants = [0.95, 0.14, 43.30986079, 0.05, 7.65646085, 40.0, 4.61372817, 1000.0]
+    paras_0 = [0.01449476, 0.00222728]
+    constants = {'E_inf': 0.95,
+                 'nu': 0.14,
+                 'mode': 'fem',
+                 'tau_number': 3,
+                 'tau': [0.1, 2.0, 1000.0],
+                 'E': [17.65974303 * 1.2, 6.20743176 * 1.2, 4.36829172 * 1.2]}
     """
     tensile_specimen_ids = [18, 23, 24]
     relax_specimen_ids = [9]
-    paras_0 = [1, 1, 1]
+    # paras_0 = [1, 1, 1]
+    paras_0 = [0.02201574, 0.00352333]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
-                 'mode': 'analytical',
+                 'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.05, 40.0, 1000.0]}
+                 'tau': [0.1, 2.0, 1000.0],
+                 'E': [23.73341081 * 1.1, 6.21570245 * 1.2, 4.75383418 * 1.1]}
     optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants)
 
 
 if __name__ == '__main__':
-    optimize_paras_0_year()
+    optimize_paras_8_year()
