@@ -11,7 +11,7 @@ from numpy import array, ndarray
 from scipy import interpolate
 from scipy.optimize import fmin
 
-from src.pydata.utils.mechanics import load_local_status, get_elastic_limit
+from src.pydata.utils.mechanics import load_local_status, get_elastic_limit, get_fracture_strain
 
 
 def finite_element_solution(paras: list, constants: dict, strain: ndarray, time: ndarray) -> tuple[ndarray, ndarray, ndarray]:
@@ -30,14 +30,12 @@ def finite_element_solution(paras: list, constants: dict, strain: ndarray, time:
     amplitude = [[time[i], strain[i]] for i in range(len(time))]
 
     BaseIO.is_read_only = False
-    nu = 0.14
-    material_data = []
 
+    material_data = []
     material_data.append(constants['E_inf'])
     material_data.append(constants['nu'])
     tau_number = constants['tau_number']
     tau = constants['tau']
-    E = constants['E']
 
     for i in range(tau_number):
         if len(tau) > 0:
@@ -110,7 +108,6 @@ def analytical_tensile_solution(paras: list, constants: dict, strain: ndarray, t
     strain_rate = np.concatenate((strain_rate, strain_rate[-1:]))
 
     E_inf = constants['E_inf']
-    nu = constants['nu']
     tau_number = constants['tau_number']
     tau = constants['tau']
 
@@ -137,7 +134,6 @@ def analytical_relax_solution(paras: list, constants: dict, strain: ndarray, tim
     计算应力松弛实验广义Maxwell模型的解析解
     """
     E_inf = constants['E_inf']
-    nu = constants['nu']
     tau_number = constants['tau_number']
     tau = constants['tau']
 
@@ -169,7 +165,20 @@ def get_experiment_data(experiments_path: str, experiment_id: int, specimen_ids:
     return experiment_data, experiment_status
 
 
-def filter_time_stress_strain(data: dict) -> dict:
+def create_data_dict(time: ndarray, strain: ndarray, stress: ndarray) -> dict:
+    f_strain_stress = interpolate.interp1d(strain, stress, kind='linear', fill_value='extrapolate')
+    f_time_strain = interpolate.interp1d(time, strain, kind='linear', fill_value='extrapolate')
+    f_time_stress = interpolate.interp1d(time, stress, kind='linear', fill_value='extrapolate')
+    data = {'Time_s': time,
+            'Strain': strain,
+            'Stress_MPa': stress,
+            'f_strain_stress': f_strain_stress,
+            'f_time_strain': f_time_strain,
+            'f_time_stress': f_time_stress}
+    return data
+
+
+def preproc_data(data: dict, strain_shift: float) -> dict:
     """
     对数据进行预处理，去除相同时间的数据点
     """
@@ -183,27 +192,29 @@ def filter_time_stress_strain(data: dict) -> dict:
         strain = np.log(strain + 1.0)
         stress = stress * (1.0 + stress)
 
+        # 去除时间重复的数据点
         is_duplicate = np.full(len(time), False)
         values, counts = np.unique(time, return_index=True)
         is_duplicate[counts] = True
         time = time[is_duplicate]
         strain = strain[is_duplicate]
         stress = stress[is_duplicate]
-        f_strain_stress = interpolate.interp1d(strain, stress, kind='linear', fill_value='extrapolate')
-        f_time_strain = interpolate.interp1d(time, strain, kind='linear', fill_value='extrapolate')
-        f_time_stress = interpolate.interp1d(time, stress, kind='linear', fill_value='extrapolate')
-        processed_data[key] = {'Time_s': time,
-                               'Strain': strain,
-                               'Stress_MPa': stress,
-                               'f_strain_stress': f_strain_stress,
-                               'f_time_strain': f_time_strain,
-                               'f_time_stress': f_time_stress}
+
+        # 应变平移
+        shift_indices = strain < strain_shift
+        shift = len(time[shift_indices])
+        strain = strain[shift:] - strain_shift
+        time = time[shift:] - time[shift]
+        stress = stress[shift:]
+
+        processed_data[key] = create_data_dict(time, strain, stress)
+
     return processed_data
 
 
-def partial_by_elastic_limit(data: dict) -> dict:
+def partial_by_elastic_limit(data: dict, strain_start: float = 0.005, strain_end: float = 0.1, threshold: float = 0.1) -> dict:
     """
-    对数据进行预处理，截取弹性部分
+    对数据进行预处理，截取弹性极限之前的部分
     """
     processed_data = {}
     for key in data.keys():
@@ -211,16 +222,8 @@ def partial_by_elastic_limit(data: dict) -> dict:
         strain = array(data[key]['Strain'])
         stress = array(data[key]['Stress_MPa'])
 
-        shift_indices = strain < 0.008
-        shift = len(time[shift_indices])
-
-        strain = strain[shift:] - 0.008
-        time = time[shift:] - time[shift]
-        stress = stress[shift:]
-
         try:
-            elastic_limit, E, shift = get_elastic_limit(strain, stress, strain_start=0.005, strain_end=0.1,
-                                                        threshold=0.1)
+            elastic_limit, E, shift = get_elastic_limit(strain, stress, strain_start, strain_end, threshold)
             elastic_indices = strain < elastic_limit[0]
             time = time[elastic_indices]
             strain = strain[elastic_indices]
@@ -228,34 +231,54 @@ def partial_by_elastic_limit(data: dict) -> dict:
         except:
             pass
 
-        # try:
-        #     fracture_strain, fracture_stress = get_fracture_strain(strain, stress, -50.0)
-        #     elastic_indices = strain < (fracture_strain - 0.1)
-        #     time = time[elastic_indices]
-        #     strain = strain[elastic_indices]
-        #     stress = stress[elastic_indices]
-        # except:
-        #     pass
+        processed_data[key] = create_data_dict(time, strain, stress)
 
-        target_rows = 100
+    return processed_data
+
+
+def partial_by_fracture_strain(data: dict) -> dict:
+    """
+    对数据进行预处理，截取断裂之前的部分
+    """
+    processed_data = {}
+    for key in data.keys():
+        time = array(data[key]['Time_s'])
+        strain = array(data[key]['Strain'])
+        stress = array(data[key]['Stress_MPa'])
+
+        try:
+            fracture_strain, fracture_stress = get_fracture_strain(strain, stress, -50.0)
+            elastic_indices = strain < fracture_strain
+            time = time[elastic_indices]
+            strain = strain[elastic_indices]
+            stress = stress[elastic_indices]
+        except:
+            pass
+
+        processed_data[key] = create_data_dict(time, strain, stress)
+
+    return processed_data
+
+
+def reduce_to_target_rows(data: dict, target_rows: int = 100) -> dict:
+    """
+    通过等间距取数，减少数据到制定行数
+    """
+    processed_data = {}
+    for key in data.keys():
+        time = array(data[key]['Time_s'])
+        strain = array(data[key]['Strain'])
+        stress = array(data[key]['Stress_MPa'])
 
         if len(time) > target_rows:
-            # 缩减到1000行，不超过1000行则不会缩减
             total_rows = len(time)
             interval = total_rows // target_rows
             time = time[::interval]
             strain = strain[::interval]
             stress = stress[::interval]
 
-        f_strain_stress = interpolate.interp1d(strain, stress, kind='linear', fill_value='extrapolate')
-        f_time_strain = interpolate.interp1d(time, strain, kind='linear', fill_value='extrapolate')
-        f_time_stress = interpolate.interp1d(time, stress, kind='linear', fill_value='extrapolate')
-        processed_data[key] = {'Time_s': time,
-                               'Strain': strain,
-                               'Stress_MPa': stress,
-                               'f_strain_stress': f_strain_stress,
-                               'f_time_strain': f_time_strain,
-                               'f_time_stress': f_time_stress}
+        processed_data[key] = create_data_dict(time, strain, stress)
+
     return processed_data
 
 
@@ -310,7 +333,7 @@ def cal_relax_cost(data: dict, paras: list, constants: dict):
 def func(x: list):
     cost = 0.0
     cost += cal_tensile_cost(processed_tensile_data, x, constants)
-    cost += cal_relax_cost(processed_relax_data, x, constants)
+    # cost += cal_relax_cost(processed_relax_data, x, constants)
     punish = 0.0
     y = cost
     for i in range(len(x)):
@@ -320,6 +343,41 @@ def func(x: list):
     return y
 
 
+def plot_tensile(specimen_ids: list, data: dict, paras: list, constants: dict) -> None:
+    for specimen_id in specimen_ids:
+        time_exp = data[specimen_id]['Time_s']
+        stress_exp = data[specimen_id]['Stress_MPa']
+        strain_exp = data[specimen_id]['Strain']
+        plt.plot(strain_exp, stress_exp, marker='o')
+
+        if constants['mode'] == 'analytical':
+            strain_sim, stress_sim, time_sim = analytical_tensile_solution(paras, constants, strain_exp, time_exp)
+        elif constants['mode'] == 'fem':
+            strain_sim, stress_sim, time_sim = finite_element_solution_damage(paras, constants, strain_exp, time_exp)
+        else:
+            raise NotImplementedError
+        plt.plot(strain_sim, stress_sim, color='red')
+    plt.show()
+
+
+def plot_relax(specimen_ids: list, data: dict, paras: list, constants: dict) -> None:
+    for specimen_id in specimen_ids:
+        time_exp = data[specimen_id]['Time_s']
+        stress_exp = data[specimen_id]['Stress_MPa']
+        strain_exp = data[specimen_id]['Strain']
+        plt.plot(time_exp, stress_exp, marker='o')
+
+        if constants['mode'] == 'analytical':
+            strain_sim, stress_sim, time_sim = analytical_relax_solution(paras, constants, strain_exp, time_exp)
+        elif constants['mode'] == 'fem':
+            strain_exp[0] = 0.0
+            strain_sim, stress_sim, time_sim = finite_element_solution_damage(paras, constants, strain_exp, time_exp)
+        else:
+            raise NotImplementedError
+        plt.plot(time_sim, stress_sim, color='red')
+    plt.show()
+
+
 if __name__ == '__main__':
     local_experiments_path = r'F:/GitHub/pydata/download/experiments'
     experiment_id = 7
@@ -327,17 +385,19 @@ if __name__ == '__main__':
     # tensile_specimen_ids = [1, 4, 7]
     tensile_specimen_ids = [11, 14, 17]
     # tensile_specimen_ids = [18, 23, 24]
-    tensile_experiment_data, tensile_experiment_status = get_experiment_data(local_experiments_path, experiment_id,
-                                                                             tensile_specimen_ids)
-    processed_tensile_data = partial_by_elastic_limit(filter_time_stress_strain(tensile_experiment_data))
+    tensile_experiment_data, tensile_experiment_status = get_experiment_data(local_experiments_path, experiment_id, tensile_specimen_ids)
+    processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.0)
+    processed_tensile_data = partial_by_elastic_limit(processed_tensile_data)
+    processed_tensile_data = reduce_to_target_rows(processed_tensile_data)
+
 
     experiment_id = 9
     # relax_specimen_ids = [1]
     relax_specimen_ids = [4]
     # relax_specimen_ids = [9]
-    relax_experiment_data, relax_experiment_status = get_experiment_data(local_experiments_path, experiment_id,
-                                                                         relax_specimen_ids)
-    processed_relax_data = partial_by_elastic_limit(filter_time_stress_strain(relax_experiment_data))
+    relax_experiment_data, relax_experiment_status = get_experiment_data(local_experiments_path, experiment_id, relax_specimen_ids)
+    processed_relax_data = preproc_data(relax_experiment_data, strain_shift=0.0)
+    processed_relax_data = reduce_to_target_rows(processed_relax_data)
 
     # paras_0 = [1.0, 2e-1, 1.0, 5.0e1, 1.0, 2.0e3]
     # constants = [0.97]
@@ -377,25 +437,5 @@ if __name__ == '__main__':
     #             paras = fmin(func, paras_0, maxiter=2000, ftol=1e-4, xtol=1e-4, disp=False)  # 优化后的参数
     #             print(tau_1, tau_2, tau_3, func(paras))
 
-    for specimen_id in tensile_specimen_ids:
-        time_exp = processed_tensile_data[specimen_id]['Time_s']
-        stress_exp = processed_tensile_data[specimen_id]['Stress_MPa']
-        strain_exp = processed_tensile_data[specimen_id]['Strain']
-        f_strain_stress = processed_tensile_data[specimen_id]['f_strain_stress']
-        plt.plot(strain_exp, stress_exp, marker='o')
-        strain_sim, stress_sim, time_sim = analytical_tensile_solution(paras, constants, strain_exp, time_exp)
-        # strain_sim, stress_sim, time_sim = finite_element_solution_damage(paras, constants, strain_exp, time_exp)
-        plt.plot(strain_sim, stress_sim, color='red')
-    plt.show()
-
-    for specimen_id in relax_specimen_ids:
-        time_exp = processed_relax_data[specimen_id]['Time_s']
-        stress_exp = processed_relax_data[specimen_id]['Stress_MPa']
-        strain_exp = processed_relax_data[specimen_id]['Strain']
-        f_strain_stress = processed_relax_data[specimen_id]['f_strain_stress']
-        plt.plot(time_exp, stress_exp, marker='o')
-        strain_sim, stress_sim, time_sim = analytical_relax_solution(paras, constants, strain_exp, time_exp)
-        # strain_exp[0] = 0.0
-        # strain_sim, stress_sim, time_sim = finite_element_solution_damage(paras, constants, strain_exp, time_exp)
-        plt.plot(time_sim, stress_sim, color='red')
-    plt.show()
+    plot_tensile(tensile_specimen_ids, processed_tensile_data, paras, constants)
+    plot_relax(relax_specimen_ids, processed_relax_data, paras, constants)
