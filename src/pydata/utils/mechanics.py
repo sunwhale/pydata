@@ -86,8 +86,6 @@ def get_peak_valley_time(strain: ndarray, stress: ndarray, time: ndarray, n: int
         diff_strain_filter = np.convolve(diff_strain, np.ones((i,)) / i, mode='same')
         if np.sum(np.sign(diff_strain_filter) == 0) == 0:
             break
-        else:
-            raise NotImplementedError
 
     peak_indices = np.where(np.diff(np.sign(diff_strain_filter)) < 0)[0]
     valley_indices = np.where(np.diff(np.sign(diff_strain_filter)) > 0)[0]
@@ -96,6 +94,34 @@ def get_peak_valley_time(strain: ndarray, stress: ndarray, time: ndarray, n: int
     valley_time = time[1:][none_zero_indices][1:][valley_indices]
 
     return peak_time, valley_time
+
+
+def get_loading_time(strain: ndarray, stress: ndarray, time: ndarray, peak_time: ndarray, valley_time: ndarray) -> dict:
+    data = {}
+    is_in_time_range = (time < peak_time[0])
+    data[0] = {}
+    data[0]['Time_s'] = time[is_in_time_range]
+    data[0]['Stress_MPa'] = stress[is_in_time_range]
+    data[0]['Strain'] = strain[is_in_time_range]
+
+    for i in range(len(valley_time) - 1):
+        is_in_time_range = (time > valley_time[i]) & (time < peak_time[i + 1])
+        data[i + 1] = {}
+        data[i + 1]['Time_s'] = time[is_in_time_range]
+        data[i + 1]['Stress_MPa'] = stress[is_in_time_range]
+        data[i + 1]['Strain'] = strain[is_in_time_range]
+    return data
+
+
+def partial_by_stress(data: dict, stress_limit: float) -> dict:
+    processed_data = {}
+    for key in data.keys():
+        indices = data[key]['Stress_MPa'] > stress_limit
+        processed_data[key] = {}
+        processed_data[key]['Stress_MPa'] = data[key]['Stress_MPa'][indices]
+        processed_data[key]['Strain'] = data[key]['Strain'][indices]
+        processed_data[key]['Time_s'] = data[key]['Time_s'][indices]
+    return processed_data
 
 
 def plot_elastic_limit(elastic_limit: list[float, float]) -> None:
@@ -137,8 +163,7 @@ if __name__ == '__main__':
     local_experiments_path = r'F:/GitHub/pydata/download/experiments'
     specimens_status = load_local_status(local_experiments_path, 8)
 
-    specimen_ids = [1]
-
+    specimen_ids = [1, 2, 6, 7, 11, 12]
     for specimen_id in specimen_ids:
         specimen_status = specimens_status[specimen_id]
         specimen_path = specimen_status['path']
@@ -155,11 +180,75 @@ if __name__ == '__main__':
 
         elastic_limit, E, shift = get_elastic_limit(strain_exp, stress_exp, 0.005, 0.1, 0.01)
         # fracture_strain, fracture_stress = get_fracture_strain(strain_exp, stress_exp, -50.0)
-        get_peak_valley_time(strain_exp, stress_exp, time, 5)
+        peak_time, valley_time = get_peak_valley_time(strain_exp, stress_exp, time, 7)
+        specimen_data = get_loading_time(strain_exp, stress_exp, time, peak_time, valley_time)
+        processed_specimen_data = partial_by_stress(specimen_data, stress_limit=0.004)
 
         # plot_stress_strain(strain_exp, stress_exp)
-        # plot_elastic_limit(elastic_limit)
-        # plot_elastic_module(elastic_limit, E, shift)
+
+        for key, value in processed_specimen_data.items():
+            if key == 0:
+                elastic_limit, E, shift = get_elastic_limit(value['Strain'], value['Stress_MPa'], value['Strain'][0] + 0.008, value['Strain'][0] + 0.01, 0.002)
+                value['elastic_limit'] = elastic_limit
+                value['E'] = E
+                value['shift'] = shift
+            else:
+                elastic_limit, E, shift = get_elastic_limit(value['Strain'], value['Stress_MPa'], value['Strain'][0], value['Strain'][0] + 0.006, 0.004)
+                value['elastic_limit'] = elastic_limit
+                value['E'] = E
+                value['shift'] = shift
+
+        strain = [value['Strain'][0] for _, value in processed_specimen_data.items()]
+        E_init = processed_specimen_data[0]['E']
+        damage = [1.0 - value['E']/E_init for _, value in processed_specimen_data.items()]
+
+        plt.plot(strain, damage, marker='o', ls='', color='red')
+
+            # plot_elastic_limit(elastic_limit)
+            # plot_elastic_module(elastic_limit, E, shift)
         # plot_ultimate_stress(stress_exp)
         # plot_fracture_strain(fracture_strain, fracture_stress)
-        plt.show()
+
+        specimen_ids = [3, 4, 8, 9, 13, 14]
+        for specimen_id in specimen_ids:
+            specimen_status = specimens_status[specimen_id]
+            specimen_path = specimen_status['path']
+            csv_file = os.path.join(specimen_path, 'timed.csv')
+            try:
+                data[specimen_id] = pd.read_csv(csv_file)
+            except Exception as e:
+                traceback.print_exc()
+                print('error:' + csv_file)
+
+            time = np.array(data[specimen_id]['Time_s'])
+            strain_exp = np.array(data[specimen_id]['Strain'])
+            stress_exp = np.array(data[specimen_id]['Stress_MPa'])
+
+            elastic_limit, E, shift = get_elastic_limit(strain_exp, stress_exp, 0.005, 0.1, 0.01)
+            # fracture_strain, fracture_stress = get_fracture_strain(strain_exp, stress_exp, -50.0)
+            peak_time, valley_time = get_peak_valley_time(strain_exp, stress_exp, time, 7)
+            specimen_data = get_loading_time(strain_exp, stress_exp, time, peak_time, valley_time)
+            processed_specimen_data = partial_by_stress(specimen_data, stress_limit=0.004)
+
+            # plot_stress_strain(strain_exp, stress_exp)
+
+            for key, value in processed_specimen_data.items():
+                if key == 0:
+                    elastic_limit, E, shift = get_elastic_limit(value['Strain'], value['Stress_MPa'], value['Strain'][0] + 0.005, value['Strain'][0] + 0.01,
+                                                                0.002)
+                    value['elastic_limit'] = elastic_limit
+                    value['E'] = E
+                    value['shift'] = shift
+                else:
+                    elastic_limit, E, shift = get_elastic_limit(value['Strain'], value['Stress_MPa'], value['Strain'][0], value['Strain'][0] + 0.006, 0.004)
+                    value['elastic_limit'] = elastic_limit
+                    value['E'] = E
+                    value['shift'] = shift
+
+            strain = [value['Strain'][0] for _, value in processed_specimen_data.items()]
+            E_init = processed_specimen_data[0]['E']
+            damage = [1.0 - value['E'] / E_init for _, value in processed_specimen_data.items()]
+
+            plt.plot(strain, damage, marker='o', ls='', color='blue')
+
+    plt.show()
