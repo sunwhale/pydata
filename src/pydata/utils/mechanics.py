@@ -53,7 +53,7 @@ def get_elastic_limit(strain: ndarray, stress: ndarray, strain_start: float, str
     elastic_strain = strain[elastic_part]
     elastic_stress = stress[elastic_part]
     E, shift = get_elastic_module(elastic_strain, elastic_stress)
-    error = E * strain + shift - stress
+    error = abs(E * strain + shift - stress)
     elastic_limit_index = strain[error < threshold].shape[0]
     elastic_limit = [float(strain[elastic_limit_index]), float(stress[elastic_limit_index])]
     return elastic_limit, E, shift
