@@ -422,7 +422,7 @@ def optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants,
     tensile_experiment_data, tensile_experiment_status = get_experiment_data(local_experiments_path, experiment_id, tensile_specimen_ids)
     processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.0)
     # processed_tensile_data = partial_by_elastic_limit(processed_tensile_data, strain_start=0.000, strain_end=0.005, threshold=0.05)
-    processed_tensile_data = partial_by_strain_range(processed_tensile_data, strain_start=0.000, strain_end=0.14)
+    processed_tensile_data = partial_by_strain_range(processed_tensile_data, strain_start=0.000, strain_end=1.60)
     # processed_tensile_data = partial_by_fracture_strain(processed_tensile_data)
     # processed_tensile_data = partial_by_ultimate_stress(processed_tensile_data)
     processed_tensile_data = reduce_to_target_rows(processed_tensile_data)
@@ -466,20 +466,36 @@ def func(x: list, processed_tensile_data: dict, processed_relax_data: dict, cons
 
 def optimize_paras_293K_0Year():
     """
-
-    """
-    tensile_specimen_ids = [1, 2, 3]
-    relax_specimen_ids = [1]
-    paras_0 = [1, 1, 1]
-    # paras_0 = [0.01645347, 0.00246116]
+    paras_0 = [0.01645347, 0.00246116]
     constants = {'E_inf': 0.65,
                  'nu': 0.14,
-                 'mode': 'analytical',
-                 # 'mode': 'fem',
+                 # 'mode': 'analytical',
+                 'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.02, 1.5, 1000],
-                 'E': [1.40194369e+00, 1.55782171e-08, 1.68914163e+00]}
-    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1000)
+                 'tau': [0.01, 20, 1000],
+                 'E': [7.43312642 * 1.2, 0.11369126 * 1.2, 1.66024908 * 1.2]}
+
+    paras_0 = [2.98733315e-02 9.22935000e-05]
+    constants = {'E_inf': 0.65,
+                 'nu': 0.14,
+                 # 'mode': 'analytical',
+                 'mode': 'fem',
+                 'tau_number': 3,
+                 'tau': [0.01, 20, 1000],
+                 'E': [1.29551853, 5.12849536, 1.33055374]}
+    """
+    tensile_specimen_ids = [100]
+    relax_specimen_ids = [1]
+    # paras_0 = [1, 1, 1]
+    paras_0 = [2.98733315e-02, 9.22935000e-05]
+    constants = {'E_inf': 0.65,
+                 'nu': 0.14,
+                 # 'mode': 'analytical',
+                 'mode': 'fem',
+                 'tau_number': 3,
+                 'tau': [0.01, 20, 1000],
+                 'E': [1.29551853, 5.12849536, 1.33055374]}
+    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=10)
 
 
 def optimize_paras_343K_0Year():
