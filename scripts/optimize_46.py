@@ -422,7 +422,7 @@ def optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants,
     tensile_experiment_data, tensile_experiment_status = get_experiment_data(local_experiments_path, experiment_id, tensile_specimen_ids)
     processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.0)
     # processed_tensile_data = partial_by_elastic_limit(processed_tensile_data, strain_start=0.000, strain_end=0.005, threshold=0.05)
-    processed_tensile_data = partial_by_strain_range(processed_tensile_data, strain_start=0.000, strain_end=1.0)
+    processed_tensile_data = partial_by_strain_range(processed_tensile_data, strain_start=0.000, strain_end=0.14)
     # processed_tensile_data = partial_by_fracture_strain(processed_tensile_data)
     # processed_tensile_data = partial_by_ultimate_stress(processed_tensile_data)
     processed_tensile_data = reduce_to_target_rows(processed_tensile_data)
@@ -432,13 +432,23 @@ def optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants,
     processed_relax_data = preproc_data(relax_experiment_data, strain_shift=0.0)
     processed_relax_data = reduce_to_target_rows(processed_relax_data)
 
-    # paras = fmin(func, paras_0, args=(processed_tensile_data, processed_relax_data, constants), maxiter=maxiter, ftol=1e-4, xtol=1e-4, disp=True)
-    # print(paras)
-
-    paras = [0.02563523, 0.00112814]
+    paras = fmin(func, paras_0, args=(processed_tensile_data, processed_relax_data, constants), maxiter=maxiter, ftol=1e-4, xtol=1e-4, disp=True)
+    print(paras)
 
     plot_tensile(tensile_specimen_ids, processed_tensile_data, paras, constants)
     # plot_relax(relax_specimen_ids, processed_relax_data, paras, constants)
+
+    # local_experiments_path = r'F:/GitHub/pydata/download/experiments'
+    # experiment_id = 3
+    # tensile_experiment_data, tensile_experiment_status = get_experiment_data(local_experiments_path, experiment_id, tensile_specimen_ids)
+    # processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.0)
+    # # processed_tensile_data = partial_by_elastic_limit(processed_tensile_data, strain_start=0.000, strain_end=0.005, threshold=0.05)
+    # # processed_tensile_data = partial_by_strain_range(processed_tensile_data, strain_start=0.000, strain_end=0.20)
+    # processed_tensile_data = partial_by_fracture_strain(processed_tensile_data)
+    # # processed_tensile_data = partial_by_ultimate_stress(processed_tensile_data)
+    # processed_tensile_data = reduce_to_target_rows(processed_tensile_data)
+    #
+    # plot_tensile(tensile_specimen_ids, processed_tensile_data, paras, constants)
 
 
 def func(x: list, processed_tensile_data: dict, processed_relax_data: dict, constants: dict):
@@ -460,16 +470,16 @@ def optimize_paras_293K_0Year():
     """
     tensile_specimen_ids = [1, 2, 3]
     relax_specimen_ids = [1]
-    # paras_0 = [1, 1, 1]
-    paras_0 = [0.01645347, 0.00246116]
+    paras_0 = [1, 1, 1]
+    # paras_0 = [0.01645347, 0.00246116]
     constants = {'E_inf': 0.65,
                  'nu': 0.14,
-                 # 'mode': 'analytical',
-                 'mode': 'fem',
+                 'mode': 'analytical',
+                 # 'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.1, 2.0, 1000],
+                 'tau': [0.02, 1.5, 1000],
                  'E': [1.40194369e+00, 1.55782171e-08, 1.68914163e+00]}
-    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=10)
+    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1000)
 
 
 def optimize_paras_343K_0Year():
@@ -516,4 +526,4 @@ def optimize_paras_233K_0Year():
 
 
 if __name__ == '__main__':
-    optimize_paras_233K_0Year()
+    optimize_paras_293K_0Year()
