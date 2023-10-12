@@ -5,6 +5,7 @@
 import os
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 from numpy import array, ndarray
@@ -103,7 +104,7 @@ def analytical_tensile_solution(paras: list, constants: dict, strain: ndarray, t
     """
     t = time
     dt = np.diff(t)
-    strain_rate = np.diff(strain) / np.diff(t)
+    strain_rate = np.diff(strain) / dt
     dt = np.concatenate((dt, dt[-1:]))
     strain_rate = np.concatenate((strain_rate, strain_rate[-1:]))
 
@@ -189,8 +190,8 @@ def preproc_data(data: dict, strain_shift: float) -> dict:
         stress = array(data[key]['Stress_MPa'])
 
         # 转换为柯西应力和对数应变
-        strain = np.log(strain + 1.0)
-        stress = stress * (1.0 + stress)
+        # strain = np.log(strain + 1.0)
+        # stress = stress * (1.0 + stress)
 
         # 去除时间重复的数据点
         is_duplicate = np.full(len(time), False)
@@ -392,8 +393,8 @@ def optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants,
     local_experiments_path = r'F:/GitHub/pydata/download/experiments'
     experiment_id = 7
     tensile_experiment_data, tensile_experiment_status = get_experiment_data(local_experiments_path, experiment_id, tensile_specimen_ids)
-    processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.01)
-    # processed_tensile_data = partial_by_elastic_limit(processed_tensile_data, strain_start=0.005, strain_end=0.1, threshold=0.05)
+    processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.008)
+    # processed_tensile_data = partial_by_elastic_limit(processed_tensile_data, strain_start=0.005, strain_end=0.1, threshold=0.1)
     processed_tensile_data = partial_by_fracture_strain(processed_tensile_data)
     # processed_tensile_data = partial_by_ultimate_stress(processed_tensile_data)
     processed_tensile_data = reduce_to_target_rows(processed_tensile_data)
@@ -425,33 +426,25 @@ def func(x: list, processed_tensile_data: dict, processed_relax_data: dict, cons
 
 def optimize_paras_0_year():
     """
-    paras_0 = [0.01656102, 0.00236847]
+    paras_0 = [0.01645347, 0.00246116]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
                  'mode': 'fem',
                  'tau_number': 3,
                  'tau': [0.1, 2.0, 1000.0],
-                 'E': [7.49243691, 5.92043313, 1.37908231]}
-
-    paras_0 = [0.01875972, 0.00206912]
-    constants = {'E_inf': 0.95,
-                 'nu': 0.14,
-                 'mode': 'fem',
-                 'tau_number': 3,
-                 'tau': [0.05, 40.0, 1000.0],
-                 'E': [20.47216724, 5.05709119, 1.2055883]}
+                 'E': [13.28859423, 5.47123938, 1.61774751]}
     """
     tensile_specimen_ids = [1, 4, 7]
     relax_specimen_ids = [1]
     # paras_0 = [1, 1, 1]
-    paras_0 = [0.01656102, 0.00236847]
+    paras_0 = [0.01645347, 0.00246116]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
                  'mode': 'fem',
                  'tau_number': 3,
                  'tau': [0.1, 2.0, 1000.0],
-                 'E': [7.49243691, 5.92043313, 1.37908231]}
-    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=20)
+                 'E': [13.28859423, 5.47123938, 1.61774751]}
+    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1)
 
 
 def optimize_paras_2_year():
@@ -474,7 +467,7 @@ def optimize_paras_2_year():
                  'tau_number': 3,
                  'tau': [0.1, 2.0, 1000.0],
                  'E': [8.77088244 * 1.2, 9.09440754 * 1.2, 2.83638807 * 1.2]}
-    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants)
+    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1)
 
 
 def optimize_paras_8_year():
@@ -489,16 +482,16 @@ def optimize_paras_8_year():
     """
     tensile_specimen_ids = [18, 23, 24]
     relax_specimen_ids = [9]
-    # paras_0 = [1, 1, 1]
-    paras_0 = [0.02201574, 0.00352333]
+    paras_0 = [1, 1, 1]
+    paras_0 = [0.01449476, 0.00222728]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
                  'mode': 'fem',
                  'tau_number': 3,
                  'tau': [0.1, 2.0, 1000.0],
-                 'E': [23.73341081 * 1.1, 6.21570245 * 1.2, 4.75383418 * 1.1]}
-    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants)
+                 'E': [17.65974303 * 1.2, 6.20743176 * 1.2, 4.36829172 * 1.2]}
+    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1)
 
 
 if __name__ == '__main__':
-    optimize_paras_8_year()
+    optimize_paras_0_year()
