@@ -3,6 +3,7 @@
 
 """
 import os
+import math
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -71,7 +72,9 @@ def finite_element_solution_damage(paras: list, constants: dict, strain: ndarray
     job = Job(r'F:\Github\pyfem\examples\mechanical_phase\1element\hex8_visco\Job-1.toml')
 
     total_time = time[-1]
-    amplitude = [[time[i], strain[i]] for i in range(len(time))]
+
+    strain_eng = np.exp(strain) - 1.0
+    amplitude = [[time[i], strain_eng[i]] for i in range(len(time))]
 
     BaseIO.is_read_only = False
 
@@ -81,19 +84,27 @@ def finite_element_solution_damage(paras: list, constants: dict, strain: ndarray
     tau_number = constants['tau_number']
     tau = constants['tau']
     E = constants['E']
+    lc = constants['lc']
     for i in range(tau_number):
         material_data.append(E[i])
         material_data.append(tau[i])
 
     job.props.materials[0].data = material_data
-    job.props.materials[1].data = paras
+    job.props.materials[1].data = [paras[0], lc]
     job.props.solver.total_time = total_time
-    job.props.solver.max_dtime = total_time / 100.0
-    job.props.solver.initial_dtime = total_time / 100.0
+    job.props.solver.max_dtime = total_time / 50.0
+    job.props.solver.initial_dtime = total_time / 50.0
     job.props.amplitudes[0].data = amplitude
     job.assembly.__init__(job.props)
 
     _, e11, s11, t = job.run()
+
+    e11 = np.array(e11)
+    s11 = np.array(s11)
+    t = np.array(t)
+
+    s11 = s11 * (1.0 + e11)
+    e11 = np.log(e11 + 1.0)
 
     return e11, s11, t
 
@@ -186,12 +197,12 @@ def preproc_data(data: dict, strain_shift: float) -> dict:
     processed_data = {}
     for key in data.keys():
         time = array(data[key]['Time_s'])
-        strain = array(data[key]['Strain'])
-        stress = array(data[key]['Stress_MPa'])
+        strain_eng = array(data[key]['Strain'])
+        stress_eng = array(data[key]['Stress_MPa'])
 
         # 转换为柯西应力和对数应变
-        # strain = np.log(strain + 1.0)
-        # stress = stress * (1.0 + stress)
+        stress = stress_eng * (1.0 + strain_eng)
+        strain = np.log(strain_eng + 1.0)
 
         # 去除时间重复的数据点
         is_duplicate = np.full(len(time), False)
@@ -284,6 +295,26 @@ def partial_by_ultimate_stress(data: dict) -> dict:
     return processed_data
 
 
+def partial_by_strain_range(data: dict, strain_start: float = 0.005, strain_end: float = 0.1) -> dict:
+    """
+    对数据进行预处理，截取弹性极限之前的部分
+    """
+    processed_data = {}
+    for key in data.keys():
+        time = array(data[key]['Time_s'])
+        strain = array(data[key]['Strain'])
+        stress = array(data[key]['Stress_MPa'])
+
+        is_in_strain_range = (strain > strain_start) & (strain < strain_end)
+        time = time[is_in_strain_range]
+        strain = strain[is_in_strain_range]
+        stress = stress[is_in_strain_range]
+
+        processed_data[key] = create_data_dict(time, strain, stress)
+
+    return processed_data
+
+
 def reduce_to_target_rows(data: dict, target_rows: int = 100) -> dict:
     """
     通过等间距取数，减少数据到制定行数
@@ -323,6 +354,7 @@ def cal_tensile_cost(data: dict, paras: list, constants: dict):
             stress_exp = f_time_stress(time_sim)
         else:
             raise NotImplementedError
+        # cost += np.sum(((stress_exp - stress_sim) / stress_exp) ** 2, axis=0) / len(time_sim)
         cost += np.sum(((stress_exp - stress_sim) / max(stress_exp)) ** 2, axis=0) / len(time_sim)
     return cost
 
@@ -350,16 +382,22 @@ def cal_relax_cost(data: dict, paras: list, constants: dict):
             stress_exp = f_time_stress(time_sim)
         else:
             raise NotImplementedError
+        # cost += np.sum(((stress_exp - stress_sim) / stress_exp) ** 2, axis=0) / len(time_exp)
         cost += np.sum(((stress_exp - stress_sim) / max(stress_exp)) ** 2, axis=0) / len(time_exp)
     return cost
 
 
 def plot_tensile(specimen_ids: list, data: dict, paras: list, constants: dict) -> None:
+    x = []
+    y = []
     for specimen_id in specimen_ids:
         time_exp = data[specimen_id]['Time_s']
         stress_exp = data[specimen_id]['Stress_MPa']
         strain_exp = data[specimen_id]['Strain']
-        plt.plot(strain_exp, stress_exp, marker='o')
+        strain_exp_eng = np.exp(strain_exp) - 1.0
+        stress_exp_eng = stress_exp / (1.0 + strain_exp_eng)
+        # plt.plot(strain_exp, stress_exp, marker='o', label=specimen_id)
+        plt.plot(strain_exp_eng, stress_exp_eng, marker='o', label=specimen_id)
 
         if constants['mode'] == 'analytical':
             strain_sim, stress_sim, time_sim = analytical_tensile_solution(paras, constants, strain_exp, time_exp)
@@ -367,7 +405,58 @@ def plot_tensile(specimen_ids: list, data: dict, paras: list, constants: dict) -
             strain_sim, stress_sim, time_sim = finite_element_solution_damage(paras, constants, strain_exp, time_exp)
         else:
             raise NotImplementedError
-        plt.plot(strain_sim, stress_sim, color='red')
+        strain_sim_eng = np.exp(strain_sim) - 1.0
+        stress_sim_eng = stress_sim / (1.0 + strain_sim_eng)
+        plt.plot(strain_sim_eng, stress_sim_eng, color='red')
+        x += [x for x in strain_exp_eng]
+        y += [y for y in stress_exp]
+        # plt.plot(strain_sim, stress_sim, color='red')
+        # x += [x for x in strain_exp]
+        # y += [y for y in stress_exp]
+
+    plt.xlabel('Strain, mm/mm', fontsize=12)
+    plt.ylabel('Stress, MPa', fontsize=12)
+    # plt.legend()
+    # plt.xlim(0, math.ceil(max(x) * 10) / 10)
+    plt.xlim(0, 0.8)
+    plt.ylim(0, math.ceil(max(y) * 10) / 10)
+    plt.savefig(f'{specimen_ids}_tensile.png', dpi=150, transparent=False)
+    plt.show()
+
+
+def plot_tensile_error(specimen_ids: list, data: dict, paras: list, constants: dict) -> None:
+    x = []
+    y = []
+    for specimen_id in specimen_ids:
+        time_exp = data[specimen_id]['Time_s']
+        stress_exp = data[specimen_id]['Stress_MPa']
+        strain_exp = data[specimen_id]['Strain']
+        f_strain_stress = data[specimen_id]['f_strain_stress']
+        strain_exp_eng = np.exp(strain_exp) - 1.0
+        stress_exp_eng = stress_exp / (1.0 + strain_exp_eng)
+
+        if constants['mode'] == 'analytical':
+            strain_sim, stress_sim, time_sim = analytical_tensile_solution(paras, constants, strain_exp, time_exp)
+        elif constants['mode'] == 'fem':
+            strain_sim, stress_sim, time_sim = finite_element_solution_damage(paras, constants, strain_exp, time_exp)
+        else:
+            raise NotImplementedError
+
+        strain_sim_eng = np.exp(strain_sim) - 1.0
+        stress_sim_eng = stress_sim / (1.0 + strain_sim_eng)
+
+        plt.plot(strain_sim_eng, (f_strain_stress(strain_sim) - stress_sim) / max(stress_exp) * 100, marker='o', label=specimen_id)
+
+    plt.xlabel('Strain, mm/mm', fontsize=12)
+    plt.ylabel('Error, %', fontsize=12)
+
+    plt.axhline(y=-12, color='r', linestyle='--')
+    plt.axhline(y=12, color='r', linestyle='--')
+    # plt.legend()
+
+    plt.xlim(0, 0.8)
+    plt.ylim(-100, 100)
+    plt.savefig(f'{specimen_ids}_error.png', dpi=150, transparent=False)
     plt.show()
 
 
@@ -393,8 +482,9 @@ def optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants,
     local_experiments_path = r'F:/GitHub/pydata/download/experiments'
     experiment_id = 7
     tensile_experiment_data, tensile_experiment_status = get_experiment_data(local_experiments_path, experiment_id, tensile_specimen_ids)
-    processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.008)
-    # processed_tensile_data = partial_by_elastic_limit(processed_tensile_data, strain_start=0.005, strain_end=0.1, threshold=0.1)
+    processed_tensile_data = preproc_data(tensile_experiment_data, strain_shift=0.01)
+    # processed_tensile_data = partial_by_elastic_limit(processed_tensile_data, strain_start=0.0002, strain_end=0.1, threshold=0.05)
+    # processed_tensile_data = partial_by_strain_range(processed_tensile_data, strain_start=0.000, strain_end=1.0)
     processed_tensile_data = partial_by_fracture_strain(processed_tensile_data)
     # processed_tensile_data = partial_by_ultimate_stress(processed_tensile_data)
     processed_tensile_data = reduce_to_target_rows(processed_tensile_data)
@@ -409,6 +499,7 @@ def optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants,
 
     plot_tensile(tensile_specimen_ids, processed_tensile_data, paras, constants)
     plot_relax(relax_specimen_ids, processed_relax_data, paras, constants)
+    plot_tensile_error(tensile_specimen_ids, processed_tensile_data, paras, constants)
 
 
 def func(x: list, processed_tensile_data: dict, processed_relax_data: dict, constants: dict):
@@ -426,72 +517,84 @@ def func(x: list, processed_tensile_data: dict, processed_relax_data: dict, cons
 
 def optimize_paras_0_year():
     """
-    paras_0 = [0.01645347, 0.00246116]
+    paras_0 = [0.00814506, 0.00302107]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
-                 'mode': 'fem',
+                 'mode': 'analytical',
+                 # 'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.1, 2.0, 1000.0],
-                 'E': [13.28859423, 5.47123938, 1.61774751]}
+                 'tau': [0.01, 0.1, 1000],
+                 'E': [5.41871449, 2.9469521, 1.28378089]}
     """
-    tensile_specimen_ids = [1, 4, 7]
+    tensile_specimen_ids = [1, 4, 5, 7, 8, 10]
+    # tensile_specimen_ids = [1, 4, 7]
     relax_specimen_ids = [1]
-    # paras_0 = [1, 1, 1]
-    paras_0 = [0.01645347, 0.00246116]
+    paras_0 = [1, 0.1, 1]
+    paras_0 = [0.00306063]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
+                 # 'mode': 'analytical',
                  'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.1, 2.0, 1000.0],
-                 'E': [13.28859423, 5.47123938, 1.61774751]}
-    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1)
+                 'tau': [0.04, 2.0, 900.0],
+                 'lc': 0.001,
+                 'E': [10.37154778 * 0.80, 3.57179881 * 0.80, 1.40161414 * 0.80]}
+    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=10)
 
 
 def optimize_paras_2_year():
     """
-    paras_0 = [0.0144384, 0.00222176]
+    # paras_0 = [0.0144384, 0.00222176]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
-                 'mode': 'fem',
+                 'mode': 'analytical',
+                 # 'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.1, 2.0, 1000.0],
-                 'E': [8.77088244 * 1.2, 9.09440754 * 1.2, 2.83638807 * 1.2]}
+                 'tau': [0.1, 2, 1000],
+                 'E': [12.71357101,  2.06710814,  2.46608323]}
     """
-    tensile_specimen_ids = [11, 14, 17]
+    # tensile_specimen_ids = [11, 15, 17]
+    tensile_specimen_ids = [11, 15, 16, 17]
     relax_specimen_ids = [4]
-    # paras_0 = [1, 1, 1]
-    paras_0 = [0.0144384, 0.00222176]
+    paras_0 = [1, 1, 1]
+    paras_0 = [0.00344321]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
+                 # 'mode': 'analytical',
                  'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.1, 2.0, 1000.0],
-                 'E': [8.77088244 * 1.2, 9.09440754 * 1.2, 2.83638807 * 1.2]}
-    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1)
+                 'tau': [0.04, 2.0, 900.0],
+                 'lc': 0.001,
+                 'E': [20.74399549 * 0.80, 2.64343753 * 0.80, 2.59019471 * 0.80]}
+    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1000)
 
 
 def optimize_paras_8_year():
     """
-    paras_0 = [0.01449476, 0.00222728]
+    paras_0 = [0.00802498, 0.00285772]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
+                 # 'mode': 'analytical',
                  'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.1, 2.0, 1000.0],
-                 'E': [17.65974303 * 1.2, 6.20743176 * 1.2, 4.36829172 * 1.2]}
+                 'tau': [0.1, 5.0, 1000.0],
+                 'E': [15.65778847, 0.8641415, 3.65905587]}
     """
-    tensile_specimen_ids = [18, 23, 24]
+    tensile_specimen_ids = [18, 21, 24]
+    tensile_specimen_ids = [18, 19, 20, 21, 24]
     relax_specimen_ids = [9]
     paras_0 = [1, 1, 1]
-    paras_0 = [0.01449476, 0.00222728]
+    paras_0 = [0.00361537]
     constants = {'E_inf': 0.95,
                  'nu': 0.14,
+                 # 'mode': 'analytical',
                  'mode': 'fem',
                  'tau_number': 3,
-                 'tau': [0.1, 2.0, 1000.0],
-                 'E': [17.65974303 * 1.2, 6.20743176 * 1.2, 4.36829172 * 1.2]}
-    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1)
+                 'tau': [0.04, 2.0, 900.0],
+                 'lc': 0.001,
+                 'E': [24.36915814 * 0.80, 1.7985747 * 0.80, 3.70530463 * 0.80]}
+    optimize_paras(tensile_specimen_ids, relax_specimen_ids, paras_0, constants, maxiter=1000)
 
 
 if __name__ == '__main__':
-    optimize_paras_0_year()
+    optimize_paras_2_year()
